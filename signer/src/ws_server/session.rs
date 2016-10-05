@@ -163,15 +163,15 @@ impl ws::Handler for Session {
 
 	fn on_message(&mut self, msg: ws::Message) -> ws::Result<()> {
 		let req = try!(msg.as_text());
-		if let Some(async) = self.handler.handle_request(req) {
-			let out = self.out.clone();
-			async.on_result(move |result| {
+		let out = self.out.clone();
+		self.handler.handle_request(req, move |res| {
+			if let Some(result) = res {
 				let res = out.lock().send(result);
 				if let Err(e) = res {
 					warn!(target: "signer", "Error while sending response: {:?}", e);
 				}
-			});
-		}
+			}
+		});
 		Ok(())
 	}
 }
