@@ -43,7 +43,7 @@ struct AccountCache {
 	modifications: VecDeque<BlockChanges>,
 }
 
-/// Pending account cache item.
+/// Buffered account cache item.
 struct CacheQueueItem {
 	/// Account address.
 	address: Address,
@@ -80,8 +80,8 @@ pub struct StateDB {
 	db: Box<JournalDB>,
 	/// Shared canonical state cache.
 	account_cache: Arc<Mutex<AccountCache>>,
-	/// Local pending cache changes.
-	pending_cache: Vec<CacheQueueItem>,
+	/// Local cache buffer.
+	cache_buffer: Vec<CacheQueueItem>,
 	/// Shared account bloom. Does not handle chain reorganizations.
 	account_bloom: Arc<Mutex<Bloom>>,
 	/// Hash of the block on top of which this instance was created or
@@ -130,7 +130,7 @@ impl StateDB {
 				accounts: LruCache::new(STATE_CACHE_ITEMS),
 				modifications: VecDeque::new(),
 			})),
-			pending_cache: Vec::new(),
+			cache_buffer: Vec::new(),
 			account_bloom: Arc::new(Mutex::new(bloom)),
 			parent_hash: None,
 			commit_hash: None,
@@ -177,7 +177,7 @@ impl StateDB {
 		Ok(records)
 	}
 
-	/// Apply pending cache changes and synchronize canonical
+	/// Apply buffered cache changes and synchronize canonical
 	/// state cache with the best block state.
 	/// This function updates the cache by removing entries that are
 	/// invalidated by chain reorganization. `update_cache` should be
@@ -236,8 +236,8 @@ impl StateDB {
 				cache.modifications.pop_back();
 			}
 			let mut modifications = HashSet::new();
-			trace!("committing {} cache entries", self.pending_cache.len());
-			for account in self.pending_cache.drain(..) {
+			trace!("committing {} cache entries", self.cache_buffer.len());
+			for account in self.cache_buffer.drain(..) {
 				if account.modified {
 					modifications.insert(account.address.clone());
 				}
@@ -287,7 +287,7 @@ impl StateDB {
 		StateDB {
 			db: self.db.boxed_clone(),
 			account_cache: self.account_cache.clone(),
-			pending_cache: Vec::new(),
+			cache_buffer: Vec::new(),
 			account_bloom: self.account_bloom.clone(),
 			parent_hash: None,
 			commit_hash: None,
@@ -300,7 +300,7 @@ impl StateDB {
 		StateDB {
 			db: self.db.boxed_clone(),
 			account_cache: self.account_cache.clone(),
-			pending_cache: Vec::new(),
+			cache_buffer: Vec::new(),
 			account_bloom: self.account_bloom.clone(),
 			parent_hash: Some(parent.clone()),
 			commit_hash: None,
@@ -326,7 +326,7 @@ impl StateDB {
 	/// Add pending cache change.
 	/// The change is queued to be applied in `commit`.
 	pub fn add_to_account_cache(&mut self, addr: Address, data: Option<Account>, modified: bool) {
-		self.pending_cache.push(CacheQueueItem {
+		self.cache_buffer.push(CacheQueueItem {
 			address: addr,
 			account: data,
 			modified: modified,
