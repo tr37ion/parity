@@ -26,7 +26,7 @@ use bloom_journal::{Bloom, BloomJournal};
 use db::COL_ACCOUNT_BLOOM;
 use byteorder::{LittleEndian, ByteOrder};
 
-const STATE_CACHE_ITEMS: usize = 65536;
+const STATE_CACHE_ITEMS: usize = 256000;
 const STATE_CACHE_BLOCKS: usize = 8;
 
 
