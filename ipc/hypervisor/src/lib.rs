@@ -53,6 +53,18 @@ pub struct BootArgs {
 	stdin: Option<Vec<u8>>,
 }
 
+/// Hypervisor errors
+#[derive(Debug)]
+pub enum Error {
+	Network(nanoipc::SocketError),
+}
+
+impl From<nanoipc::SocketError> for Error {
+	fn from(err: nanoipc::SocketError) -> Self {
+		Error::Network(err)
+	}
+}
+
 impl BootArgs {
 	/// New empty boot arguments
 	pub fn new() -> BootArgs {
@@ -118,11 +130,18 @@ impl Hypervisor {
 		self.modules.get(module_id)
 	}
 
+	/// Establishes socket with the designated address
+	/// for incoming hypervisor connections
+	pub fn bind(&self) -> Result<(), Error> {
+		let mut worker = self.ipc_worker.write().unwrap();
+		try!(worker.add_reqrep(&self.ipc_addr));
+		try!(worker.poll());
+		trace!(target: "hypervisor", "Started hypervisor socket at '{}'", &self.ipc_addr);
+		Ok(())
+	}
+
 	/// Creates IPC listener and starts all binaries
 	pub fn start(&self) {
-		let mut worker = self.ipc_worker.write().unwrap();
-		worker.add_reqrep(&self.ipc_addr).unwrap_or_else(|e| panic!("Hypervisor ipc worker can not start - critical! ({:?})", e));
-
 		for module_id in self.service.module_ids() {
 			self.start_module(module_id);
 		}
@@ -180,11 +199,12 @@ impl Hypervisor {
 	}
 
 	/// Waits for every required module to check in
-	pub fn wait_for_startup(&self) {
+	pub fn wait_for_startup(&self) -> Result<(), Error> {
 		let mut worker = self.ipc_worker.write().unwrap();
 		while !self.modules_ready() {
-			worker.poll()
+			try!(worker.poll());
 		}
+		Ok(())
 	}
 
 	/// Waits for every required module to check in
@@ -194,7 +214,7 @@ impl Hypervisor {
 		let mut worker = self.ipc_worker.write().unwrap();
 		let start = PreciseTime::now();
 		while !self.modules_shutdown() {
-			worker.poll();
+			if let Err(_) = worker.poll() { break; }
 			if start.to(PreciseTime::now()) > Duration::seconds(30) {
 				warn!("Some modules failed to shutdown gracefully, they will be terminated.");
 				break;

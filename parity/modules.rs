@@ -78,15 +78,22 @@ mod ipc_deps {
 }
 
 #[cfg(feature="ipc")]
-pub fn hypervisor(base_path: &Path) -> Option<Hypervisor> {
-	Some(Hypervisor
+pub fn hypervisor(base_path: &Path) -> Result<Option<Hypervisor>, String> {
+	let hypervisor = Hypervisor
 		::with_url(&service_urls::with_base(base_path.to_str().unwrap(), HYPERVISOR_IPC_URL))
-		.io_path(base_path.to_str().unwrap()))
+		.io_path(base_path.to_str().unwrap());
+
+	try!(
+		hypervisor.bind().map_err(
+			|e| format!("Failed to establish hypervisor socket (probably other instance is running using the same directory): {:?}", e))
+	);
+
+	Ok(Some(hypervisor))
 }
 
 #[cfg(not(feature="ipc"))]
-pub fn hypervisor(_: &Path) -> Option<Hypervisor> {
-	None
+pub fn hypervisor(_: &Path) -> Result<Option<Hypervisor>, String> {
+	Ok(None)
 }
 
 #[cfg(feature="ipc")]
@@ -126,14 +133,17 @@ pub fn sync
 		_snapshot_service: Arc<SnapshotService>,
 		log_settings: &LogConfig,
 	)
-	-> Result<SyncModules, NetworkError>
+	-> Result<SyncModules, String>
 {
 	let mut hypervisor = hypervisor_ref.take().expect("There should be hypervisor for ipc configuration");
 	let args = sync_arguments(&hypervisor.io_path, sync_cfg, net_cfg, log_settings);
 	hypervisor = hypervisor.module(SYNC_MODULE_ID, args);
 
 	hypervisor.start();
-	hypervisor.wait_for_startup();
+	try!(
+		hypervisor.wait_for_startup().map_err(
+			|e| format!("Failed to establish hypervisor socket (probably other instance is running using the same directory): {:?}", e))
+	);
 
 	let sync_client = generic_client::<SyncClient<_>>(
 		&service_urls::with_base(&hypervisor.io_path, service_urls::SYNC)).unwrap();
@@ -156,8 +166,8 @@ pub fn sync
 		snapshot_service: Arc<SnapshotService>,
 		_log_settings: &LogConfig,
 	)
-	-> Result<SyncModules, NetworkError>
+	-> Result<SyncModules, String>
 {
-	let eth_sync = try!(EthSync::new(sync_cfg, client, snapshot_service, net_cfg));
+	let eth_sync = try!(EthSync::new(sync_cfg, client, snapshot_service, net_cfg).map_err(|e| format!("Error initializing network {:?}", e)));
 	Ok((eth_sync.clone() as Arc<SyncProvider>, eth_sync.clone() as Arc<ManageNetwork>, eth_sync.clone() as Arc<ChainNotify>))
 }

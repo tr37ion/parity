@@ -35,7 +35,7 @@ const DEBUG_CONNECTION_TIMEOUT: isize = 5000;
 /// Generic worker to handle service (binded) sockets
 pub struct Worker<S: ?Sized> where S: IpcInterface {
 	service: Arc<S>,
-	sockets: Vec<(Socket, Endpoint)>,
+	sockets: Vec<(Socket, Endpoint, String)>,
 	polls: Vec<PollFd>,
 	buf: Vec<u8>,
 }
@@ -145,6 +145,10 @@ pub enum SocketError {
 	DuplexLink,
 	/// Error establising duplex (paired) socket and/or endpoint
 	RequestLink,
+	/// Error polling socket (using invalid address)
+	PollingInvalid,
+	/// Read failed
+	ReadFailed,
 }
 
 impl<S: ?Sized> Worker<S> where S: IpcInterface {
@@ -159,15 +163,24 @@ impl<S: ?Sized> Worker<S> where S: IpcInterface {
 	}
 
 	/// Polls all sockets, reads and dispatches method invocations
-	pub fn poll(&mut self) {
+	pub fn poll(&mut self) -> Result<(), SocketError> {
 		use std::io::Write;
 
 		let mut request = PollRequest::new(&mut self.polls[..]);
- 		let _result_guard = Socket::poll(&mut request, POLL_TIMEOUT);
+ 		try!(
+ 			match Socket::poll(&mut request, POLL_TIMEOUT) {
+ 				Err(Error::TimedOut) => { return Ok(()) },
+ 				Ok(_) => Ok(()),
+ 				Err(e) => {
+					trace!(target: "ipc", "Polling error: {:?}", e);
+ 					Err(SocketError::PollingInvalid)
+				}
+			}
+		);
 
 		for (fd_index, fd) in request.get_fds().iter().enumerate() {
 			if fd.can_read() {
-				let (ref mut socket, _) = self.sockets[fd_index];
+				let (ref mut socket, _, _) = self.sockets[fd_index];
 				unsafe { self.buf.set_len(0); }
 				match socket.nb_read_to_end(&mut self.buf) {
 					Ok(method_sign_len) => {
@@ -192,19 +205,31 @@ impl<S: ?Sized> Worker<S> where S: IpcInterface {
 					Err(Error::TryAgain) => {
 					},
 					Err(x) => {
-						warn!(target: "ipc", "Error polling connections {:?}", x);
-						panic!();
+						warn!(target: "ipc", "Error reading from socket {:?}", x);
+						return Err(SocketError::ReadFailed);
 					}
 				}
 			}
 		}
+		Ok(())
 	}
 
 	/// Stores nanomsg poll request for reuse
 	fn rebuild_poll_request(&mut self) {
 		self.polls = self.sockets.iter()
-			.map(|&(ref socket, _)| socket.new_pollfd(PollInOut::In))
+			.map(|&(ref socket, _, _)| socket.new_pollfd(PollInOut::In))
 			.collect::<Vec<PollFd>>();
+	}
+
+	fn remove_unix_file(socket_addr: &str) {
+		if !cfg!(windows) {
+			// try to remove file for unix socket
+			let addr_parts: Vec<&str> = socket_addr.split("://").collect();
+			if addr_parts.len() != 2 { return; }
+			if addr_parts[0] == "ipc" {
+				let _ = ::std::fs::remove_file(addr_parts[1]);
+			}
+		}
 	}
 
 	/// Add exclusive socket for paired client
@@ -220,7 +245,7 @@ impl<S: ?Sized> Worker<S> where S: IpcInterface {
 			SocketError::DuplexLink
 		}));
 
-		self.sockets.push((socket, endpoint));
+		self.sockets.push((socket, endpoint, addr.to_owned()));
 
 		self.rebuild_poll_request();
 
@@ -243,12 +268,20 @@ impl<S: ?Sized> Worker<S> where S: IpcInterface {
 			SocketError::DuplexLink
 		}));
 
-		self.sockets.push((socket, endpoint));
+		self.sockets.push((socket, endpoint, addr.to_owned()));
 
 		self.rebuild_poll_request();
 
 		trace!(target: "ipc", "Started request-reply worker at {}", addr);
 		Ok(())
+	}
+}
+
+impl<S: ?Sized> Drop for Worker<S> where S: IpcInterface {
+	fn drop(&mut self) {
+		for &(_, _, ref socket_addr) in self.sockets.iter() {
+			Self::remove_unix_file(socket_addr);
+		}
 	}
 }
 
@@ -317,9 +350,25 @@ mod service_tests {
 		let service = Arc::new(DummyService::new());
 		let mut worker = Worker::<DummyService>::new(&service);
 		worker.add_duplex("ipc:///tmp/parity-test20.ipc").unwrap();
-		worker.poll();
+		worker.poll().unwrap();
 		assert_eq!(0, service.methods_stack.read().unwrap().len());
 	}
+
+
+	#[test]
+	#[should_panic]
+	fn workers_cant_poll_same_socket() {
+		let service = Arc::new(DummyService::new());
+		let mut worker1 = Worker::<DummyService>::new(&service);
+		worker1.add_duplex("ipc:///tmp/parity-test15.ipc").unwrap();
+		worker1.poll().unwrap();
+
+		let mut worker2 = Worker::<DummyService>::new(&service);
+		worker2.add_duplex("ipc:///tmp/parity-test15.ipc").unwrap();
+		worker2.poll().unwrap();
+		assert_eq!(0, service.methods_stack.read().unwrap().len());
+	}
+
 
 	#[test]
 	fn worker_can_poll() {
@@ -329,7 +378,7 @@ mod service_tests {
 		worker.add_duplex(url).unwrap();
 
 		let (_socket, _endpoint) = dummy_write(url, &vec![0, 0, 7, 7, 6, 6]);
-		worker.poll();
+		worker.poll().unwrap();
 
 		assert_eq!(1, worker.service.methods_stack.read().unwrap().len());
 		assert_eq!(0, worker.service.methods_stack.read().unwrap()[0].method_num);
@@ -346,7 +395,7 @@ mod service_tests {
 		let message = [0u8; 1024*1024];
 
 		let (_socket, _endpoint) = dummy_write(url, &message);
-		worker.poll();
+		worker.poll().unwrap();
 
 		assert_eq!(1, worker.service.methods_stack.read().unwrap().len());
 		assert_eq!(0, worker.service.methods_stack.read().unwrap()[0].method_num);

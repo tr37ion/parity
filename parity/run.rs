@@ -202,7 +202,7 @@ pub fn execute(cmd: RunCmd) -> Result<(), String> {
 	}
 
 	// create supervisor
-	let mut hypervisor = modules::hypervisor(&cmd.dirs.ipc_path());
+	let mut hypervisor = try!(modules::hypervisor(&cmd.dirs.ipc_path()));
 
 	// create client service.
 	let service = try!(ClientService::start(

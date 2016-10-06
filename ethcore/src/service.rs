@@ -219,7 +219,10 @@ fn run_ipc(base_path: &Path, client: Arc<Client>, snapshot_service: Arc<Snapshot
 		worker.add_reqrep(&socket_addr).expect("Ipc expected to initialize with no issues");
 
 		while !s.load(::std::sync::atomic::Ordering::Relaxed) {
-			worker.poll();
+			if let Err(e) = worker.poll() {
+				warn!("Transport error for ipc service: {:?}", e);
+				break;
+			}
 		}
 	});
 
@@ -231,7 +234,10 @@ fn run_ipc(base_path: &Path, client: Arc<Client>, snapshot_service: Arc<Snapshot
 		worker.add_reqrep(&socket_addr).expect("Ipc expected to initialize with no issues");
 
 		while !stop.load(::std::sync::atomic::Ordering::Relaxed) {
-			worker.poll();
+			if let Err(e) = worker.poll() {
+				warn!("Transport error for ipc service: {:?}", e);
+				break;
+			}
 		}
 	});
 }
