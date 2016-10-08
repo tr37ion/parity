@@ -23,8 +23,8 @@ use rlp::{UntrustedRlp, RlpType, View, Compressible};
 use rocksdb::{DB, Writable, WriteBatch, WriteOptions, IteratorMode, DBIterator,
 	Options, DBCompactionStyle, BlockBasedOptions, Direction, Cache, Column};
 
-const DB_BACKGROUND_FLUSHES: i32 = 2;
-const DB_BACKGROUND_COMPACTIONS: i32 = 2;
+//const DB_BACKGROUND_FLUSHES: i32 = 2;
+//const DB_BACKGROUND_COMPACTIONS: i32 = 2;
 
 /// Write transaction. Batches a sequence of put/delete operations for efficiency.
 pub struct DBTransaction {
@@ -210,16 +210,17 @@ impl Database {
 	/// Open database file. Creates if it does not exist.
 	pub fn open(config: &DatabaseConfig, path: &str) -> Result<Database, String> {
 		let mut opts = Options::new();
-		if let Some(rate_limit) = config.compaction.write_rate_limit {
-			try!(opts.set_parsed_options(&format!("rate_limiter_bytes_per_sec={}", rate_limit)));
-		}
+
+		//if let Some(rate_limit) = config.compaction.write_rate_limit {
+		//	try!(opts.set_parsed_options(&format!("rate_limiter_bytes_per_sec={}", rate_limit)));
+		//}
 		try!(opts.set_parsed_options(&format!("max_total_wal_size={}", 64 * 1024 * 1024)));
 		opts.set_max_open_files(config.max_open_files);
 		opts.create_if_missing(true);
 		opts.set_use_fsync(false);
 
-		opts.set_max_background_flushes(DB_BACKGROUND_FLUSHES);
-		opts.set_max_background_compactions(DB_BACKGROUND_COMPACTIONS);
+		//opts.set_max_background_flushes(DB_BACKGROUND_FLUSHES);
+		//opts.set_max_background_compactions(DB_BACKGROUND_COMPACTIONS);
 
 		// compaction settings
 		opts.set_compaction_style(DBCompactionStyle::DBUniversalCompaction);
