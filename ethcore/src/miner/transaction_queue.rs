@@ -809,6 +809,11 @@ impl TransactionQueue {
 			return Err(TransactionError::AlreadyImported);
 		}
 
+		if tx.transaction.value.is_zero() && tx.origin != TransactionOrigin::Local {
+			trace!(target: "txqueue", "Dropping 0-value transaction: {:?}", tx.hash());
+			return Err(TransactionError::LimitReached);
+		}
+
 		let min_gas_price = (self.minimal_gas_price, self.strategy);
 		let address = tx.sender();
 		let nonce = tx.nonce();
