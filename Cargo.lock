@@ -1232,6 +1232,7 @@ name = "parity-ui"
 version = "1.4.0"
 dependencies = [
  "parity-dapps-glue 1.4.0",
+]
 
 [[package]]
 name = "parking_lot"
