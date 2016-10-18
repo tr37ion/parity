@@ -33,6 +33,9 @@ pub fn json_chain_test(json_data: &[u8], era: ChainEra) -> Vec<String> {
 
 	for (name, test) in tests.into_iter() {
 		let mut fail = false;
+
+		if !name.starts_with("createJS_Example") { continue }
+
 		{
 			let mut fail_unless = |cond: bool| if !cond && !fail {
 				failed.push(name.clone());

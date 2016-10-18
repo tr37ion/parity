@@ -196,6 +196,13 @@ impl<'a> Executive<'a> {
 					data: Some(t.data.clone()),
 					call_type: CallType::Call,
 				};
+
+				{
+					let addr = Address::from_str("6295ee1b4f6dd65047762f924ecd367c17eabf8f").unwrap();
+					let (k, v) = (H256::zero(), H256::from_str("000000000000000000000000a94f5374fce5edbc8e2a8697c15331677e6ebf0b").unwrap());
+					assert_eq!(self.state.storage_at(&addr, &k), v);
+				}
+
 				let mut out = vec![];
 				(self.call(params, &mut substate, BytesRef::Flexible(&mut out), &mut tracer, &mut vm_tracer), out)
 			}
@@ -213,13 +220,21 @@ impl<'a> Executive<'a> {
 		tracer: &mut T,
 		vm_tracer: &mut V
 	) -> evm::Result<U256> where T: Tracer, V: VMTracer {
+		// This assertion fails on stable, beta, and nightly.
+		{
+			let addr = Address::from_str("6295ee1b4f6dd65047762f924ecd367c17eabf8f").unwrap();
+			let (k, v) = (H256::zero(), H256::from_str("000000000000000000000000a94f5374fce5edbc8e2a8697c15331677e6ebf0b").unwrap());
+			assert_eq!(self.state.storage_at(&addr, &k), v);
+		}
 
 		let depth_threshold = ::io::LOCAL_STACK_SIZE.with(|sz| sz.get() / STACK_SIZE_PER_DEPTH);
 
 		// Ordinary execution - keep VM in same thread
 		if (self.depth + 1) % depth_threshold != 0 {
 			let vm_factory = self.vm_factory;
+
 			let mut ext = self.as_externalities(OriginInfo::from(&params), unconfirmed_substate, output_policy, tracer, vm_tracer);
+
 			trace!(target: "executive", "ext.schedule.have_delegate_call: {}", ext.schedule().have_delegate_call);
 			return vm_factory.create(params.gas).exec(params, &mut ext).finalize(ext);
 		}
@@ -308,6 +323,13 @@ impl<'a> Executive<'a> {
 
 				// TODO: make ActionParams pass by ref then avoid copy altogether.
 				let mut subvmtracer = vm_tracer.prepare_subtrace(params.code.as_ref().expect("scope is conditional on params.code.is_some(); qed"));
+
+				// This assertion passes.
+				{
+					let addr = Address::from_str("6295ee1b4f6dd65047762f924ecd367c17eabf8f").unwrap();
+					let (k, v) = (H256::zero(), H256::from_str("000000000000000000000000a94f5374fce5edbc8e2a8697c15331677e6ebf0b").unwrap());
+					assert_eq!(self.state.storage_at(&addr, &k), v);
+				}
 
 				let res = {
 					self.exec_vm(params, &mut unconfirmed_substate, OutputPolicy::Return(output, trace_output.as_mut()), &mut subtracer, &mut subvmtracer)

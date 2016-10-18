@@ -166,6 +166,9 @@ impl Account {
 		if let Some(value) = self.cached_storage_at(key) {
 			return value;
 		}
+
+		trace!(target: "state", "looking up from trie, root={}", self.storage_root);
+
 		let db = SecTrieDB::new(db, &self.storage_root)
 			.expect("Account storage_root initially set to zero (valid) and only altered by SecTrieDBMut. \
 			SecTrieDBMut would not set it to an invalid state root. Therefore the root is valid and DB creation \
@@ -189,6 +192,13 @@ impl Account {
 		if let Some(value) = self.storage_cache.borrow_mut().get_mut(key) {
 			return Some(value.clone())
 		}
+
+		trace!(target: "state", "Couldn't find cached storage; entries:");
+
+		for (k, v) in self.storage_cache.borrow().iter() {
+			trace!(target: "state", "  ({}, {})", k, v);
+		}
+
 		None
 	}
 
@@ -329,8 +339,12 @@ impl Account {
 			if let Err(e) = res {
 				warn!("Encountered potential DB corruption: {}", e);
 			}
+
+			trace!(target: "state", "  putting ({}, {}) in account storage cache.", k, v);
 			self.storage_cache.borrow_mut().insert(k, v);
 		}
+
+		trace!(target: "state", "committed storage, new root={}", t.root());
 	}
 
 	/// Commit any unsaved code. `code_hash` will always return the hash of the `code_cache` after this.

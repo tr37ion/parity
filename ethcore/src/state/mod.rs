@@ -239,6 +239,7 @@ impl State {
 
 	/// Create a recoverable snaphot of this state.
 	pub fn snapshot(&mut self) {
+		trace!(target: "state", "Taking snapshot");
 		self.snapshots.get_mut().push(HashMap::new());
 	}
 
@@ -247,6 +248,8 @@ impl State {
 		// merge with previous snapshot
 		let last = self.snapshots.get_mut().pop();
 		if let Some(mut snapshot) = last {
+			trace!(target: "state", "Merging snapshot with previous");
+
 			if let Some(ref mut prev) = self.snapshots.get_mut().last_mut() {
 				if prev.is_empty() {
 					**prev = snapshot;
@@ -262,6 +265,8 @@ impl State {
 	/// Revert to the last snapshot and discard it.
 	pub fn revert_to_snapshot(&mut self) {
 		if let Some(mut snapshot) = self.snapshots.get_mut().pop() {
+			trace!(target: "state", "Reverting to previous snapshot");
+
 			for (k, v) in snapshot.drain() {
 				match v {
 					Some(v) => {
@@ -335,6 +340,7 @@ impl State {
 
 	/// Remove an existing account.
 	pub fn kill_account(&mut self, account: &Address) {
+		trace!(target: "state", "kill_account({})", account);
 		self.insert_cache(account, AccountEntry::new_dirty(None));
 	}
 
@@ -361,6 +367,7 @@ impl State {
 		// 1. If there's an entry for the account in the local cache check for the key and return it if found.
 		// 2. If there's an entry for the account in the global cache check for the key or load it into that account.
 		// 3. If account is missing in the global cache load it into the local cache and cache the key there.
+		trace!(target: "state", "storage_at({}, {})", address, key);
 
 		// check local cache first without updating
 		{
@@ -370,6 +377,7 @@ impl State {
 				match maybe_acc.account {
 					Some(ref account) => {
 						if let Some(value) = account.cached_storage_at(key) {
+							trace!(target: "state", "  cached storage at: {}", value);
 							return value;
 						} else {
 							local_account = Some(maybe_acc);
@@ -384,12 +392,16 @@ impl State {
 					let account_db = self.factories.accountdb.readonly(self.db.as_hashdb(), a.address_hash(address));
 					a.storage_at(account_db.as_hashdb(), key)
 				})) {
+				trace!(target: "state", "  globally cached w/ lookup: {}", result);
 				return result;
 			}
 			if let Some(ref mut acc) = local_account {
 				if let Some(ref account) = acc.account {
 					let account_db = self.factories.accountdb.readonly(self.db.as_hashdb(), account.address_hash(address));
-					return account.storage_at(account_db.as_hashdb(), key)
+					let result = account.storage_at(account_db.as_hashdb(), key);
+					trace!(target: "state", "  locally cached w/ lookup: {}", result);
+
+					return result;
 				} else {
 					return H256::new()
 				}
@@ -410,6 +422,7 @@ impl State {
 			a.storage_at(account_db.as_hashdb(), key)
 		});
 		self.insert_cache(address, AccountEntry::new_clean(maybe_acc));
+		trace!(target: "state", "  loaded account and looked up: {}", r);
 		r
 	}
 
@@ -459,7 +472,10 @@ impl State {
 
 	/// Mutate storage of account `a` so that it is `value` for `key`.
 	pub fn set_storage(&mut self, a: &Address, key: H256, value: H256) {
-		if self.storage_at(a, &key) != value {
+		let old = self.storage_at(a, &key);
+
+		trace!(target: "state", "set_storage({}, {}), old={}, new={}", a, key, old, value);
+		if old != value {
 			self.require(a, false).set_storage(key, value)
 		}
 	}
@@ -482,6 +498,13 @@ impl State {
 
 		let options = TransactOptions { tracing: tracing, vm_tracing: false, check_nonce: true };
 		let vm_factory = self.factories.vm.clone();
+
+		{
+			let addr = Address::from_str("6295ee1b4f6dd65047762f924ecd367c17eabf8f").unwrap();
+			let (k, v) = (H256::zero(), H256::from_str("000000000000000000000000a94f5374fce5edbc8e2a8697c15331677e6ebf0b").unwrap());
+			assert_eq!(self.cache.borrow().get(&addr).unwrap().account.as_ref().unwrap().cached_storage_at(&k).unwrap(), v);
+		}
+
 		let e = try!(Executive::new(self, env_info, engine, &vm_factory).transact(t, options));
 
 		// TODO uncomment once to_pod() works correctly.
@@ -508,6 +531,8 @@ impl State {
 					db.note_account_bloom(&address);
 					let addr_hash = account.address_hash(address);
 					let mut account_db = factories.accountdb.create(db.as_hashdb_mut(), addr_hash);
+
+					trace!(target: "state", "committing storage and code for account {}", address);
 					account.commit_storage(&factories.trie, account_db.as_hashdb_mut());
 					account.commit_code(account_db.as_hashdb_mut());
 				}
